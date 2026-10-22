@@ -1,16 +1,27 @@
 using Avalonia.Threading;
 using Ryujinx.HLE.HOS.Services.Hid.Netplay;
 using System;
+using System.Linq;
 
 namespace Ryujinx.Ava.UI.Windows
 {
     public partial class RyuSyncWindow : StyleableWindow
     {
         private readonly RyuSyncSession _session = RyuSyncSession.Instance;
+        private bool _inviting;
 
         public RyuSyncWindow()
         {
             InitializeComponent();
+
+            BufferFramesBox.ItemsSource = Enumerable.Range(0, RyuSyncSession.MaximumInputDelayFrames + 1).ToArray();
+            BufferFramesBox.SelectionChanged += (_, _) =>
+            {
+                if (BufferFramesBox.IsEnabled && BufferFramesBox.SelectedItem is int frames && frames != _session.InputDelayFrames)
+                {
+                    _session.SetInputDelayFrames(frames);
+                }
+            };
 
             _session.StateChanged += Session_StateChanged;
             Closed += (_, _) => _session.StateChanged -= Session_StateChanged;
@@ -22,7 +33,8 @@ namespace Ryujinx.Ava.UI.Windows
         {
             try
             {
-                InviteButton.IsEnabled = false;
+                _inviting = true;
+                UpdateUi();
                 await _session.SendInvitationAsync(PeerAddressBox.Text);
             }
             catch (Exception ex)
@@ -31,6 +43,7 @@ namespace Ryujinx.Ava.UI.Windows
             }
             finally
             {
+                _inviting = false;
                 UpdateUi();
             }
         }
@@ -77,8 +90,11 @@ namespace Ryujinx.Ava.UI.Windows
                 ? $"Incoming invitation from {_session.RemoteDisplayName}. Accept to join as Player 2."
                 : string.Empty;
 
-            InviteButton.IsEnabled = !connected && !_session.InvitationPending;
+            InviteButton.IsEnabled = !_inviting && _session.CanSetInputDelayFrames;
             PeerAddressBox.IsEnabled = InviteButton.IsEnabled;
+            BufferFramesBox.IsEnabled = InviteButton.IsEnabled;
+            BufferFramesBox.SelectedItem = _session.InputDelayFrames;
+            BufferDescription.Text = $"{_session.InputDelayFrames} frames: approximately {_session.InputDelayFrames * 1000.0 / 60:0} ms of added delay. Currently measured in 60 Hz input steps, not verified SSBU updates.";
             ReadyButton.IsEnabled = connected && _session.LaunchTransfer?.Started != true;
             DisconnectButton.IsEnabled = connected;
             ReadyButton.Content = _session.LocalReady ? "Not Ready" : "Ready";

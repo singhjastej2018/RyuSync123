@@ -4,6 +4,13 @@ Both players need this version of RyuSync (protocol 2). On each computer, config
 the physical controller as local Player 1. RyuSync maps the inviter to shared P1 and
 the guest to shared P2.
 
+In the RyuSync window, the host can choose **Frames to buffer** from 0 to 8 before
+inviting (default 3). The guest adopts the host's value. The control is locked
+while connected; disconnect to change it. The value lasts for this app session.
+More buffering gives inputs longer to arrive, at the cost of extra delay.
+These are still 60 Hz input steps, not verified SSBU updates; changing this value
+does not establish lockstep or fix drift.
+
 Connect, click Ready on both computers, then launch SSBU on both. Before either
 emulated game starts, the host exports the selected user's committed SSBU account
 save and the game's device save. The guest checks the archive's SHA-256 checksum

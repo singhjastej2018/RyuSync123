@@ -169,6 +169,17 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             }
         }
 
+        public bool CanSetInputDelayFrames
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _controlClient == null;
+                }
+            }
+        }
+
         public int InputDelayFrames
         {
             get

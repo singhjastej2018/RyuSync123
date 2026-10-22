@@ -8,12 +8,15 @@ using System.Text;
 
 // Test both sides of a real TCP connection and exchange UDP controller packets.
 // Reflection avoids adding a production API solely for ephemeral test ports.
-await CheckInputExchange(RyuSyncRole.Host);
-await CheckInputExchange(RyuSyncRole.Guest);
-Console.WriteLine("PASS: host and guest both exchange input and preserve P1/P2 assignments.");
+for (int delay = 0; delay <= RyuSyncSession.MaximumInputDelayFrames; delay++)
+{
+    await CheckInputExchange(RyuSyncRole.Host, delay);
+    await CheckInputExchange(RyuSyncRole.Guest, delay);
+}
+Console.WriteLine("PASS: host and guest exchange input with every buffer size, preserve P1/P2 assignments and lock the buffer while connected.");
 await LaunchTests.Run();
 
-static async Task CheckInputExchange(RyuSyncRole role)
+static async Task CheckInputExchange(RyuSyncRole role, int delay)
 {
     using TcpListener listener = new(IPAddress.Loopback, 0);
     listener.Start();
@@ -26,6 +29,12 @@ static async Task CheckInputExchange(RyuSyncRole role)
     using StreamWriter control = new(peer.GetStream(), new UTF8Encoding(false), leaveOpen: true) { AutoFlush = true };
 
     RyuSyncSession session = (RyuSyncSession)Activator.CreateInstance(typeof(RyuSyncSession), nonPublic: true)!;
+    if (!session.CanSetInputDelayFrames) throw new Exception("Buffer is locked while disconnected");
+    session.SetInputDelayFrames(-1);
+    if (session.InputDelayFrames != 0) throw new Exception("Negative buffer was accepted");
+    session.SetInputDelayFrames(RyuSyncSession.MaximumInputDelayFrames + 1);
+    if (session.InputDelayFrames != RyuSyncSession.MaximumInputDelayFrames) throw new Exception("Oversized buffer was accepted");
+    session.SetInputDelayFrames(role == RyuSyncRole.Host ? delay : (delay + 1) % 9);
     const BindingFlags privateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     typeof(RyuSyncSession).GetMethod("InitializeControlConnection", privateInstance)!.Invoke(session, [owner, role]);
 
@@ -42,12 +51,15 @@ static async Task CheckInputExchange(RyuSyncRole role)
         }
         else
         {
-            await control.WriteLineAsync($"INVITE|{RyuSyncSession.ProtocolVersion}|{RyuSyncSession.DefaultInputDelayFrames}");
+            await control.WriteLineAsync($"INVITE|{RyuSyncSession.ProtocolVersion}|{delay}");
             await WaitUntil(() => session.InvitationPending, "Guest invitation was not received");
             session.AcceptInvitation();
         }
 
         await WaitUntil(() => session.IsSessionEstablished, "Session was not accepted");
+        if (session.CanSetInputDelayFrames) throw new Exception("Buffer is editable while connected");
+        session.SetInputDelayFrames((delay + 1) % 9);
+        if (session.InputDelayFrames != delay) throw new Exception("Buffer negotiation or connection lock failed");
         session.SetReady(true);
         session.NotifyGameStarted();
         await control.WriteLineAsync("READY|1");
@@ -105,6 +117,7 @@ static async Task CheckInputExchange(RyuSyncRole role)
     finally
     {
         session.Disconnect();
+        if (!session.CanSetInputDelayFrames) throw new Exception("Disconnect did not unlock the buffer");
         peer.Close();
     }
 }

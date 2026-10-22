@@ -60,7 +60,12 @@
                         IsEnabled="False" />
             </StackPanel>
 
-            <TextBlock Text="Input buffer: 3 frames (50 ms at 60 FPS). Motion controls and rumble are not synchronized in this version."
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="Frames to buffer" VerticalAlignment="Center" />
+                <ComboBox x:Name="BufferFramesBox" MinWidth="80" />
+            </StackPanel>
+            <TextBlock x:Name="BufferDescription" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
+            <TextBlock Text="The host chooses before inviting. Both players use that value. More buffering adds delay but gives inputs longer to arrive. This does not fix drift between game updates. Motion controls and rumble are not synchronized."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.75" />
