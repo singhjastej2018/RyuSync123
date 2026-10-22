@@ -183,6 +183,18 @@ namespace Ryujinx.Headless
 
             _inputManager = new InputManager(new SDL3KeyboardDriver(), new SDL3GamepadDriver());
 
+            if (OperatingSystem.IsMacOS())
+            {
+                // GameController delivers existing MFi devices asynchronously.
+                // Process those events before resolving the selected controller ID.
+                for (int i = 0; i < 300; i++)
+                {
+                    SDL3.SDL_PumpEvents();
+                    WindowBase.ProcessMainThreadQueue();
+                    Thread.Sleep(10);
+                }
+            }
+
             GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
 
             if (OperatingSystem.IsMacOS())
