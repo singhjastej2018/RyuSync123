@@ -54,6 +54,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         private GamepadInput _currentP1;
         private GamepadInput _currentP2;
         private bool _hasCurrentPair;
+        private bool? _simulationStepClock;
+        private long _lastSimulationStep = -1;
 
         private RyuSyncRole _role;
         private string _remoteDisplayName = string.Empty;
@@ -359,6 +361,20 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
 
         public bool TryGetSynchronizedInputs(GamepadInput localInput, out GamepadInput p1, out GamepadInput p2)
         {
+            return TryGetSynchronizedInputs(localInput, null, out p1, out p2);
+        }
+
+        // Called only by a guest simulation hook. Both peers must use that hook.
+        // Repeated requests for one step return its latched pair; a missing pair
+        // leaves the step pending. Host time is used only to pace retransmission.
+        internal bool TryGetInputsForSimulationStep(long step, GamepadInput localInput, out GamepadInput p1, out GamepadInput p2)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(step);
+            return TryGetSynchronizedInputs(localInput, step, out p1, out p2);
+        }
+
+        private bool TryGetSynchronizedInputs(GamepadInput localInput, long? simulationStep, out GamepadInput p1, out GamepadInput p2)
+        {
             p1 = default;
             p2 = default;
 
@@ -373,9 +389,25 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                     return false;
                 }
 
+                bool usesSimulationSteps = simulationStep.HasValue;
+                if (_simulationStepClock.HasValue && _simulationStepClock.Value != usesSimulationSteps)
+                {
+                    throw new InvalidOperationException("Cannot mix computer-clock input ticks with simulation steps in one session.");
+                }
+
+                if (simulationStep.HasValue && simulationStep != _lastSimulationStep && simulationStep != _lastSimulationStep + 1)
+                {
+                    throw new InvalidOperationException($"Expected simulation step {_lastSimulationStep + 1}, received {simulationStep}.");
+                }
+
+                _simulationStepClock = usesSimulationSteps;
                 long now = Stopwatch.GetTimestamp();
 
-                if (now >= _nextInputTickTimestamp)
+                bool advance = simulationStep.HasValue
+                    ? simulationStep != _lastSimulationStep
+                    : now >= _nextInputTickTimestamp;
+
+                if (advance)
                 {
                     long scheduledTick = _playbackTick + _inputDelayFrames;
 
@@ -433,6 +465,11 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
 
                         result = false;
                         goto ExitLock;
+                    }
+
+                    if (simulationStep.HasValue)
+                    {
+                        _lastSimulationStep = simulationStep.Value;
                     }
                 }
 
@@ -670,6 +707,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 _remoteFrames.Clear();
                 _playbackTick = 0;
                 _hasCurrentPair = false;
+                _simulationStepClock = null;
+                _lastSimulationStep = -1;
                 _nextInputTickTimestamp = Stopwatch.GetTimestamp();
                 _lastUdpSendTimestamp = 0;
                 _gameplayClockStarted = true;
@@ -972,6 +1011,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 _localFrames.Clear();
                 _remoteFrames.Clear();
                 _hasCurrentPair = false;
+                _simulationStepClock = null;
+                _lastSimulationStep = -1;
                 _status = status;
 
                 if (stopListener)

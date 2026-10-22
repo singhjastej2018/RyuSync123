@@ -12,11 +12,14 @@ for (int delay = 0; delay <= RyuSyncSession.MaximumInputDelayFrames; delay++)
 {
     await CheckInputExchange(RyuSyncRole.Host, delay);
     await CheckInputExchange(RyuSyncRole.Guest, delay);
+    await CheckInputExchange(RyuSyncRole.Host, delay, simulationSteps: true);
+    await CheckInputExchange(RyuSyncRole.Guest, delay, simulationSteps: true);
 }
 Console.WriteLine("PASS: host and guest exchange input with every buffer size, preserve P1/P2 assignments and lock the buffer while connected.");
+Console.WriteLine("PASS: simulation steps advance without a clock deadline, latch repeated reads, wait for missing input and reject skipped steps or mixed clocks.");
 await LaunchTests.Run();
 
-static async Task CheckInputExchange(RyuSyncRole role, int delay)
+static async Task CheckInputExchange(RyuSyncRole role, int delay, bool simulationSteps = false)
 {
     using TcpListener listener = new(IPAddress.Loopback, 0);
     listener.Start();
@@ -71,7 +74,13 @@ static async Task CheckInputExchange(RyuSyncRole role, int delay)
         }
 
         GamepadInput local = new() { PlayerId = PlayerIndex.Player1, Buttons = ControllerKeys.A };
-        session.TryGetSynchronizedInputs(local, out _, out _);
+        long nextStep = 0;
+        if (simulationSteps)
+        {
+            // A simulated step must proceed even if no computer-clock tick is due.
+            typeof(RyuSyncSession).GetField("_nextInputTickTimestamp", privateInstance)!.SetValue(session, long.MaxValue);
+        }
+        ReadInput(out _, out _);
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
         UdpReceiveResult sent = await peerInput.ReceiveAsync(timeout.Token);
         if (sent.Buffer.Length < 34 || sent.Buffer[0] != RyuSyncSession.ProtocolVersion)
@@ -97,7 +106,7 @@ static async Task CheckInputExchange(RyuSyncRole role, int delay)
         await peerInput.SendAsync(data, data.Length, sent.RemoteEndPoint);
         GamepadInput p1 = default;
         GamepadInput p2 = default;
-        await WaitUntil(() => session.TryGetSynchronizedInputs(local, out p1, out p2) &&
+        await WaitUntil(() => ReadInput(out p1, out p2) &&
                               session.PlaybackTick > session.InputDelayFrames,
                         "Playback stalled waiting for valid peer input");
 
@@ -112,6 +121,61 @@ static async Task CheckInputExchange(RyuSyncRole role, int delay)
         if (!session.Status.StartsWith("Synchronized"))
         {
             throw new Exception("Session did not report successful input synchronization");
+        }
+
+        if (simulationSteps)
+        {
+            long tick = session.PlaybackTick;
+            GamepadInput changed = new() { PlayerId = PlayerIndex.Player1, Buttons = ControllerKeys.X };
+            typeof(RyuSyncSession).GetField("_nextInputTickTimestamp", privateInstance)!.SetValue(session, 0L);
+            for (int read = 0; read < 5; read++)
+            {
+                if (!session.TryGetInputsForSimulationStep(nextStep - 1, changed, out GamepadInput repeatedP1, out GamepadInput repeatedP2) ||
+                    repeatedP1.Buttons != expectedP1 || repeatedP2.Buttons != expectedP2 || session.PlaybackTick != tick)
+                {
+                    throw new Exception("A repeated step changed or consumed its latched input pair");
+                }
+            }
+
+            // The peer has sent only the first playable step. Every later step
+            // must stay pending, even though an older input pair is available.
+            if (session.TryGetInputsForSimulationStep(nextStep, local, out _, out _) || session.PlaybackTick != tick)
+            {
+                throw new Exception("A missing peer input advanced the simulation step");
+            }
+
+            MustReject(() => session.TryGetInputsForSimulationStep(nextStep + 1, local, out _, out _));
+            MustReject(() => session.TryGetSynchronizedInputs(local, out _, out _));
+
+            // Deliver the missing packet after the step has stalled. It must
+            // complete that same step with the originally queued local input.
+            BitConverter.TryWriteBytes(data.AsSpan(2, sizeof(long)), nextStep);
+            await peerInput.SendAsync(data, data.Length, sent.RemoteEndPoint);
+            await WaitUntil(() => ReadInput(out p1, out p2), "A pending simulation step did not resume when its peer input arrived");
+            if (p1.Buttons != expectedP1 || p2.Buttons != expectedP2 || session.PlaybackTick != tick + 1)
+            {
+                throw new Exception("The resumed step skipped or changed its input pair");
+            }
+            MustReject(() => session.TryGetInputsForSimulationStep(0, local, out _, out _));
+        }
+        else
+        {
+            MustReject(() => session.TryGetInputsForSimulationStep(0, local, out _, out _));
+        }
+
+        bool ReadInput(out GamepadInput first, out GamepadInput second)
+        {
+            if (!simulationSteps) return session.TryGetSynchronizedInputs(local, out first, out second);
+            bool ready = session.TryGetInputsForSimulationStep(nextStep, local, out first, out second);
+            if (ready) nextStep++;
+            return ready;
+        }
+
+        static void MustReject(Action action)
+        {
+            try { action(); }
+            catch (InvalidOperationException) { return; }
+            throw new Exception("An invalid step or clock change was accepted");
         }
     }
     finally

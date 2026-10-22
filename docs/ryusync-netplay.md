@@ -41,7 +41,10 @@ The current input loop advances at approximately 60 Hz using each host's
 `Stopwatch`, independently of the game's actual simulation frames. A controller
 state can therefore be observed for different numbers of game updates on the two
 machines. HID initialization now populates its ring buffers directly instead of
-injecting synthetic neutral states into the netplay input stream. No comparison of game memory verifies
+injecting synthetic neutral states into the netplay input stream. Both controller
+states are now committed before releasing a launch or input wait. This closes a
+read-before-commit race, but does not tie input to a simulation step.
+No comparison of game memory verifies
 that the two simulations still agree.
 
 Matching a seed does not synchronize CPU scheduling, timer reads, random-call
@@ -55,12 +58,21 @@ emulated points, controlled timing/randomness, and state checks to detect diverg
 copying a save does not establish those guarantees, especially across Windows x64
 and macOS arm64.
 
+The session also has an internal `TryGetInputsForSimulationStep` path for a future
+verified guest hook. It consumes one pair per numbered step, latches repeated
+requests and leaves a missing pair pending. It rejects skipped steps and mixing
+step requests with the computer-clock path. No guest hook calls it yet; normal
+play still uses the existing clock. The internal path must not be enabled on one
+peer without negotiating the same behavior on the other peer.
+
 ## Verification
 
 `dotnet run --project tests/RyuSync.NetworkTests -c Release` exercises real TCP/UDP
 input transport, host/guest controller mapping, chunked save transfer, startup
 acknowledgements, isolation, cleanup, shared random bytes, incompatible settings,
 corrupt archives, unsafe paths and disconnects. It requires no external packages.
+It also checks numbered steps with buffer sizes 0–8 for both roles, including
+delayed arrival, repeated reads, skipped steps and mixing clock modes.
 
 After preparing the existing pinned LibHac package as in the build workflow,
 `tests/RyuSync.SaveTests` verifies reads, writes, commit and read-only mounts using

@@ -94,22 +94,8 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 return;
             }
 
-            if (_pausedForBarrier)
-            {
-                _device.System.TogglePauseEmulation(false);
-                _pausedForBarrier = false;
-                Logger.Info?.Print(LogClass.Hid, "RyuSync launch barrier released.");
-            }
-
             if (session.TryGetSynchronizedInputs(localInput, out GamepadInput p1, out GamepadInput p2))
             {
-                if (_pausedForInput)
-                {
-                    _device.System.TogglePauseEmulation(false);
-                    _pausedForInput = false;
-                    Logger.Debug?.Print(LogClass.Hid, $"RyuSync input resumed at tick {session.PlaybackTick}.");
-                }
-
                 // NpadManager itself runs roughly every millisecond. Writing the same synchronized
                 // state on every call would let the two machines accumulate different HID sampling
                 // counts. Commit exactly one P1/P2 batch for each 60 Hz RyuSync tick instead.
@@ -119,6 +105,15 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                     GamepadInput[] synchronizedInputs = [p1, p2];
                     base.Update(synchronizedInputs);
                     _lastAppliedPlaybackTick = playbackTick;
+                }
+
+                // Publish both controllers before guest threads can read them.
+                if (_pausedForBarrier || _pausedForInput)
+                {
+                    _device.System.TogglePauseEmulation(false);
+                    _pausedForBarrier = false;
+                    _pausedForInput = false;
+                    Logger.Debug?.Print(LogClass.Hid, $"RyuSync resumed after committing input tick {playbackTick}.");
                 }
             }
             else
