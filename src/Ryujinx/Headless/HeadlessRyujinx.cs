@@ -189,7 +189,7 @@ namespace Ryujinx.Headless
                 // Process those events before resolving the selected controller ID.
                 for (int i = 0; i < 300; i++)
                 {
-                    SDL3.SDL_PumpEvents();
+                    global::SDL.SDL3.SDL_PumpEvents();
                     WindowBase.ProcessMainThreadQueue();
                     Thread.Sleep(10);
                 }
