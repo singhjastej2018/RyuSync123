@@ -65,15 +65,15 @@
                 <ComboBox x:Name="BufferFramesBox" MinWidth="80" />
             </StackPanel>
             <TextBlock x:Name="BufferDescription" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
-            <TextBlock Text="The host chooses before inviting. Both players use that value. More buffering adds delay but gives inputs longer to arrive. This does not fix drift between game updates. Motion controls and rumble are not synchronized."
+            <TextBlock Text="The host chooses before inviting. Both players use that value. More buffering adds delay but gives inputs longer to arrive. Motion controls and rumble are not synchronized."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.75" />
-            <TextBlock Text="After both players click Ready, launch the same SSBU version. The host's saved progress is transferred and verified before launch. The guest plays on a temporary copy; their own save is preserved. Session changes are saved only on the host."
+            <TextBlock Text="After both players click Ready, launch SSBU 1.0.0. Both need this RyuSync build. The host's saved progress is transferred and verified before launch. The guest plays on a temporary copy; their own save is preserved. Session changes are saved only on the host."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.75" />
-            <TextBlock Text="Experimental input synchronization: matching saves and startup randomness do not guarantee identical simulation. Cursor or gameplay drift can still occur. Keep game versions, DLC and mods identical."
+            <TextBlock Text="Experimental numbered updates for SSBU 1.0.0: each application update waits for its input pair. This is not yet verified in two-computer play. Drift can still occur. Keep DLC and mods identical. On a timeout or disconnect, stop both games before reconnecting."
                        TextWrapping="Wrap"
                        FontSize="12"
                        Opacity="0.75" />

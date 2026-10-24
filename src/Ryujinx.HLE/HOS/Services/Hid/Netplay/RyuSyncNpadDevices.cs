@@ -1,14 +1,17 @@
 using Ryujinx.Common.Logging;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
 {
     public sealed class RyuSyncNpadDevices : NpadDevices
     {
         private bool _pausedForBarrier;
-        private bool _pausedForInput;
         private bool _gameStartAnnounced;
-        private long _lastAppliedPlaybackTick = -1;
+        private readonly object _inputLock = new();
+        private GamepadInput _localInput;
+        private bool _hasLocalInput;
+        private long _localInputTimestamp;
 
         public RyuSyncNpadDevices(Switch device, bool active = true) : base(device, active)
         {
@@ -18,7 +21,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         {
             RyuSyncSession session = RyuSyncSession.Instance;
 
-            if (!session.IsSessionEstablished)
+            if (_device.Configuration.RyuSyncLaunch == null)
             {
                 base.Configure(configs);
                 return;
@@ -40,7 +43,10 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 },
             ];
 
-            base.Configure(netplayConfigs);
+            lock (_inputLock)
+            {
+                base.Configure(netplayConfigs);
+            }
 
             if (!_gameStartAnnounced)
             {
@@ -60,7 +66,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         {
             RyuSyncSession session = RyuSyncSession.Instance;
 
-            if (!session.IsSessionEstablished)
+            if (_device.Configuration.RyuSyncLaunch == null)
             {
                 ReleaseNetplayPauseIfNeeded();
                 base.Update(states);
@@ -82,49 +88,46 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 }
             }
 
-            if (!foundLocalInput)
+            lock (_inputLock)
             {
-                PauseForInput();
-                return;
+                _localInput = localInput;
+                _hasLocalInput = foundLocalInput;
+                _localInputTimestamp = Stopwatch.GetTimestamp();
             }
 
-            if (!session.GameplayClockStarted)
+            if (session.IsSessionEstablished && !session.GameplayClockStarted)
             {
                 PauseForBarrier();
                 return;
             }
 
-            if (session.TryGetSynchronizedInputs(localInput, out GamepadInput p1, out GamepadInput p2))
+            // The host poller only samples the physical controller. The game hook
+            // commits both virtual controllers immediately before SSBU polls them.
+            // Release the launch pause so the game can reach that hook.
+            if (session.GameplayClockStarted)
             {
-                // NpadManager itself runs roughly every millisecond. Writing the same synchronized
-                // state on every call would let the two machines accumulate different HID sampling
-                // counts. Commit exactly one P1/P2 batch for each 60 Hz RyuSync tick instead.
-                long playbackTick = session.PlaybackTick;
-                if (playbackTick != _lastAppliedPlaybackTick)
-                {
-                    GamepadInput[] synchronizedInputs = [p1, p2];
-                    base.Update(synchronizedInputs);
-                    _lastAppliedPlaybackTick = playbackTick;
-                }
-
-                // Publish both controllers before guest threads can read them.
-                if (_pausedForBarrier || _pausedForInput)
-                {
-                    _device.System.TogglePauseEmulation(false);
-                    _pausedForBarrier = false;
-                    _pausedForInput = false;
-                    Logger.Debug?.Print(LogClass.Hid, $"RyuSync resumed after committing input tick {playbackTick}.");
-                }
+                ReleaseNetplayPauseIfNeeded();
             }
-            else
+        }
+
+        internal bool TryCommitSimulationStep(long step)
+        {
+            lock (_inputLock)
             {
-                PauseForInput();
+                if (!_hasLocalInput || Stopwatch.GetTimestamp() - _localInputTimestamp > Stopwatch.Frequency ||
+                    !RyuSyncSession.Instance.TryGetInputsForSimulationStep(step, _localInput, out GamepadInput p1, out GamepadInput p2))
+                {
+                    return false;
+                }
+                GamepadInput[] inputs = [p1, p2];
+                base.Update(inputs);
+                return true;
             }
         }
 
         public new void UpdateSixAxis(IList<SixAxisInput> states)
         {
-            if (!RyuSyncSession.Instance.IsSessionEstablished)
+            if (_device.Configuration.RyuSyncLaunch == null)
             {
                 base.UpdateSixAxis(states);
             }
@@ -144,28 +147,14 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             _pausedForBarrier = true;
         }
 
-        private void PauseForInput()
-        {
-            if (_pausedForInput || _device.System.IsPaused)
-            {
-                return;
-            }
-
-            _device.System.TogglePauseEmulation(true);
-            _pausedForInput = true;
-            Logger.Debug?.Print(LogClass.Hid, "RyuSync waiting for the remote input tick.");
-        }
-
         private void ReleaseNetplayPauseIfNeeded()
         {
-            if ((_pausedForBarrier || _pausedForInput) && _device.System.IsPaused)
+            if (_pausedForBarrier && _device.System.IsPaused)
             {
                 _device.System.TogglePauseEmulation(false);
             }
 
             _pausedForBarrier = false;
-            _pausedForInput = false;
-            _lastAppliedPlaybackTick = -1;
         }
     }
 }

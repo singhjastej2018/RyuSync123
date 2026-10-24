@@ -1951,6 +1951,14 @@ namespace Ryujinx.Ava.UI.ViewModels
             {
                 await AppHost.LoadGuestApplication(cts, customNacpData);
             }
+            catch (InvalidOperationException exception) when (ryuSyncLaunch != null)
+            {
+                RyuSyncSession.Instance.Disconnect();
+                AppHost.DisposeContext();
+                AppHost = null;
+                await ContentDialogHelper.CreateErrorDialog("RyuSync launch cancelled: " + exception.Message);
+                return;
+            }
             catch (OperationCanceledException exception)
             {
                 Logger.Info?.Print(LogClass.Application,

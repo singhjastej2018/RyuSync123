@@ -21,7 +21,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
     {
         public const int ControlPort = 24872;
         public const int InputPort = 24873;
-        public const int ProtocolVersion = 2;
+        public const int ProtocolVersion = 3; // Requires the SSBU 1.0.0 numbered-update hook on both peers.
         public const int DefaultInputDelayFrames = 3;
         public const int MaximumInputDelayFrames = 8;
 
@@ -502,6 +502,12 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         {
             SendControl("BYE");
             DisconnectInternal("Disconnected", false);
+        }
+
+        internal void FailSimulation(string message)
+        {
+            SendControl("BYE");
+            DisconnectInternal(message, false);
         }
 
         private async Task AcceptLoopAsync()

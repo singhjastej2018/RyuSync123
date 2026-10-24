@@ -29,7 +29,11 @@ namespace Ryujinx.HLE.HOS.Kernel.SupervisorCall
                 _context.CriticalSection.Leave();
             }
 
-            if (context.IsAarch32)
+            if (currentThread.Owner?.RyuSyncHook?.Handle(context, currentThread, address, id) == true)
+            {
+                // These private SVCs preserve the registers of the replaced game instructions.
+            }
+            else if (context.IsAarch32)
             {
                 SyscallDispatch.Dispatch32(_context.Syscall, context, id);
             }

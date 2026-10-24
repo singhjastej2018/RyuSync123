@@ -23,6 +23,10 @@ namespace Ryujinx.Ava.UI.ViewModels
             {
                 throw new InvalidOperationException("RyuSync currently supports only Super Smash Bros. Ultimate. Disconnect to launch another title.");
             }
+            if (application.Version != "1.0.0")
+            {
+                throw new InvalidOperationException("Experimental RyuSync update synchronization currently requires SSBU 1.0.0. Disable the game update before launching. The executable is also verified during loading.");
+            }
             if (!session.LocalReady || !session.RemoteReady)
             {
                 throw new InvalidOperationException("Both players must click Ready before launching SSBU.");

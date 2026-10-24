@@ -16,6 +16,7 @@ using Ryujinx.HLE.HOS.Kernel;
 using Ryujinx.HLE.HOS.Kernel.Common;
 using Ryujinx.HLE.HOS.Kernel.Memory;
 using Ryujinx.HLE.HOS.Kernel.Process;
+using Ryujinx.HLE.HOS.Services.Hid.Netplay;
 using Ryujinx.HLE.Loaders.Executables;
 using Ryujinx.Horizon.Common;
 using Ryujinx.Horizon.Sdk.Arp;
@@ -235,6 +236,31 @@ namespace Ryujinx.HLE.Loaders.Processes
         {
             context.Device.System.ServiceTable.WaitServicesReady();
 
+            int syncMainIndex = -1;
+            if (device.Configuration.RyuSyncLaunch != null)
+            {
+                if (programId != RyuSyncLaunchSnapshot.SmashTitleId)
+                {
+                    throw new InvalidOperationException("RyuSync update synchronization only supports SSBU 1.0.0.");
+                }
+                for (int i = 0; i < executables.Length; i++)
+                {
+                    if (executables[i] is NsoExecutable { Name: "main" } main)
+                    {
+                        RyuSyncSsbuPatch.Apply(main.Text, main.TextOffset, Convert.ToHexString(main.BuildId));
+                        syncMainIndex = i;
+                        break;
+                    }
+                }
+                if (syncMainIndex < 0)
+                {
+                    throw new InvalidOperationException("RyuSync could not find the supported SSBU main executable.");
+                }
+                // Never load translations of the unpatched game or persist patched translations.
+                diskCacheEnabled = false;
+                diskCacheSelector = "ryusync-numbered-v1";
+            }
+
             LibHac.Result resultCode = metaLoader.GetNpdm(out LibHac.Loader.Npdm npdm);
 
             if (resultCode.IsFailure())
@@ -412,6 +438,12 @@ namespace Ryujinx.HLE.Loaders.Processes
             }
 
             process.DefaultCpuCore = meta.DefaultCpuId;
+
+            if (syncMainIndex >= 0)
+            {
+                process.RyuSyncHook = new RyuSyncSsbuHook(device, nsoBase[syncMainIndex]);
+                Logger.Info?.Print(LogClass.Loader, "RyuSync experimental SSBU 1.0.0 numbered updates enabled; translation disk cache disabled.");
+            }
 
             context.Processes.TryAdd(process.Pid, process);
 

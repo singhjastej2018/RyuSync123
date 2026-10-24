@@ -94,7 +94,7 @@ namespace Ryujinx.Ava.UI.Windows
             PeerAddressBox.IsEnabled = InviteButton.IsEnabled;
             BufferFramesBox.IsEnabled = InviteButton.IsEnabled;
             BufferFramesBox.SelectedItem = _session.InputDelayFrames;
-            BufferDescription.Text = $"{_session.InputDelayFrames} frames: approximately {_session.InputDelayFrames * 1000.0 / 60:0} ms of added delay. Currently measured in 60 Hz input steps, not verified SSBU updates.";
+            BufferDescription.Text = $"{_session.InputDelayFrames} updates: approximately {_session.InputDelayFrames * 1000.0 / 60:0} ms of added delay at 60 updates per second. Slower play adds more delay.";
             ReadyButton.IsEnabled = connected && _session.LaunchTransfer?.Started != true;
             DisconnectButton.IsEnabled = connected;
             ReadyButton.Content = _session.LocalReady ? "Not Ready" : "Ready";

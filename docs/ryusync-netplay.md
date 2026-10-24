@@ -1,6 +1,6 @@
 # RyuSync SSBU sessions
 
-Both players need this version of RyuSync (protocol 2). On each computer, configure
+Both players need this version of RyuSync (protocol 3) and **SSBU 1.0.0**. On each computer, configure
 the physical controller as local Player 1. RyuSync maps the inviter to shared P1 and
 the guest to shared P2.
 
@@ -8,8 +8,9 @@ In the RyuSync window, the host can choose **Frames to buffer** from 0 to 8 befo
 inviting (default 3). The guest adopts the host's value. The control is locked
 while connected; disconnect to change it. The value lasts for this app session.
 More buffering gives inputs longer to arrive, at the cost of extra delay.
-These are still 60 Hz input steps, not verified SSBU updates; changing this value
-does not establish lockstep or fix drift.
+The buffer counts numbered application updates. At 60 updates per second, each
+adds about 16.7 ms; slower play increases that delay. This is experimental and
+does not guarantee matching game state.
 
 Connect, click Ready on both computers, then launch SSBU on both. Before either
 emulated game starts, the host exports the selected user's committed SSBU account
@@ -18,8 +19,9 @@ and prepares a temporary session copy. Both peers must acknowledge preparation
 before launching. Transfers time out after three minutes; disconnect and reconnect
 to retry. Saves larger than 256 MiB are rejected.
 
-The SSBU version, firmware, language, region, time zone, docked mode and CPU clock
-rate must match. DLC and mods must also match; their contents are not yet verified
+The SSBU version, firmware, language, region, time zone, docked mode and emulated
+CPU clock multiplier must match. Physical CPU speeds do not need to match.
+DLC and mods must also match; their contents are not yet verified
 by the handshake.
 
 The guest's game reads and writes the temporary copy, including after a network
@@ -36,16 +38,34 @@ cryptography is unchanged; emulated Internet access starts disabled for sessions
 
 ## Cursor drift and determinism
 
-Matching starting data is necessary but insufficient for deterministic play.
-The current input loop advances at approximately 60 Hz using each host's
-`Stopwatch`, independently of the game's actual simulation frames. A controller
-state can therefore be observed for different numbers of game updates on the two
-machines. HID initialization now populates its ring buffers directly instead of
-injecting synthetic neutral states into the netplay input stream. Both controller
-states are now committed before releasing a launch or input wait. This closes a
-read-before-commit race, but does not tie input to a simulation step.
-No comparison of game memory verifies
-that the two simulations still agree.
+The saved capture `20261023-201224` recorded three controller polls but four
+application calls. Both battle counters advanced in each call, including the
+extra call without another poll. Debugger pauses can trigger catch-up; this is
+evidence of the mechanism, not its frequency in normal play.
+
+For the exact supported main executable, the loader now applies a guarded patch
+in memory. It forces the loop's input count to one and always takes the fresh-input
+path. The catch-up queue still drains, but its extra application call is removed.
+Before SSBU polls controllers, a private SVC waits for the numbered input pair and
+commits both controllers once. Two more SVCs check the call/return order and emulate
+the instructions they replace. Host time caps speed at 60 updates per second and
+paces retries; it does not assign inputs to updates. Missing input yields the
+emulated core and logs a warning after five seconds. It does not impose a timeout
+on legitimate loading or pauses; closing the game cancels the wait. On failure or
+disconnect, the update thread stays stopped until the game is closed. Reconnecting
+does not resume that running game. Other workers are not globally frozen by this hook.
+
+The build ID and all affected instructions are checked before patching. Unsupported
+executables or conflicting code patches fail launch rather than using the old
+clock path. The game file is never modified. Translation disk caching is disabled
+for patched sessions to avoid using or saving translations of different code.
+Offline launches remain unchanged. Buffer selection stays in the RyuSync window.
+
+This is a prototype, not verified deterministic lockstep. The application loop
+covers menu dispatch as well as matches, but the new behavior in menus, transitions,
+pause and slow motion still needs live verification. Forcing the ordinary path and
+removing extra calls can change timing-dependent behavior. No comparison of game
+memory verifies that the two simulations still agree.
 
 Matching a seed does not synchronize CPU scheduling, timer reads, random-call
 ordering, asynchronous services, or game-internal RNGs. Cursor and gameplay drift
@@ -58,12 +78,10 @@ emulated points, controlled timing/randomness, and state checks to detect diverg
 copying a save does not establish those guarantees, especially across Windows x64
 and macOS arm64.
 
-The session also has an internal `TryGetInputsForSimulationStep` path for a future
-verified guest hook. It consumes one pair per numbered step, latches repeated
-requests and leaves a missing pair pending. It rejects skipped steps and mixing
-step requests with the computer-clock path. No guest hook calls it yet; normal
-play still uses the existing clock. The internal path must not be enabled on one
-peer without negotiating the same behavior on the other peer.
+The hook calls `TryGetInputsForSimulationStep`. It consumes one pair per numbered
+step, latches repeated requests and leaves a missing pair pending. It rejects
+skipped steps and mixing step requests with the computer-clock path. Protocol 3
+rejects older peers; both sides must use this behavior.
 
 ## Verification
 
@@ -73,6 +91,9 @@ acknowledgements, isolation, cleanup, shared random bytes, incompatible settings
 corrupt archives, unsafe paths and disconnects. It requires no external packages.
 It also checks numbered steps with buffer sizes 0–8 for both roles, including
 delayed arrival, repeated reads, skipped steps and mixing clock modes.
+It also tests atomic patch rejection, instruction encoding, fresh-input routing,
+removal of the extra application call and valid/invalid update sequences. The
+instruction guards were separately compared with the saved local SSBU excerpts.
 
 After preparing the existing pinned LibHac package as in the build workflow,
 `tests/RyuSync.SaveTests` verifies reads, writes, commit and read-only mounts using

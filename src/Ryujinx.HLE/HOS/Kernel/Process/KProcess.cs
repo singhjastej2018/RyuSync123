@@ -6,6 +6,7 @@ using Ryujinx.HLE.Exceptions;
 using Ryujinx.HLE.HOS.Kernel.Common;
 using Ryujinx.HLE.HOS.Kernel.Memory;
 using Ryujinx.HLE.HOS.Kernel.Threading;
+using Ryujinx.HLE.HOS.Services.Hid.Netplay;
 using Ryujinx.Horizon.Common;
 using Ryujinx.Memory;
 using System;
@@ -89,6 +90,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Process
 
         private IProcessContextFactory _contextFactory;
         public IProcessContext Context { get; private set; }
+        internal RyuSyncSsbuHook RyuSyncHook { get; set; }
         public IVirtualMemoryManager CpuMemory => Context.AddressSpace;
 
         public HleProcessDebugger Debugger { get; private set; }
