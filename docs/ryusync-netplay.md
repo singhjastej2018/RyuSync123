@@ -85,6 +85,36 @@ rejects older peers; both sides must use this behavior.
 
 ## Verification
 
+### Capturing gameplay divergence
+
+The diagnostic build keeps the last 8192 completed application updates in memory
+(about 137 seconds at 60 updates/sec). It records the actual P1/P2 input pair and
+six battle-clock words immediately before and after the existing application call.
+The clock addresses are verified against the supported executable. No additional
+breakpoints, game-memory writes, network messages or per-update disk writes are used.
+Small read/record overhead remains; this is not a claim of zero timing impact.
+
+Reproduce with Zelda versus Ganondorf on both PCs. Prefer the same named stage and
+rules on both. As soon as a hit differs, both players should open RyuSync and click
+**Export recent diagnostics**. Files are saved under Ryujinx's `Logs` directory;
+the window displays the full path. Export remains available after stopping the
+game, until another session starts or the app closes. Send both files. No game
+code, saves or keys are included. A hash of the shared session seed identifies
+matching sessions; the seed itself is not exported.
+
+For analysis, run `python tools/compare_ryusync_diagnostics.py host.txt guest.txt`.
+The comparison matches update numbers, not wall-clock timestamps. It rejects files
+from different sessions/builds or two files from the same role. It reports the
+earliest difference **within their retained overlap**, gaps and invalid input
+metadata. Older divergence may be outside the retained window.
+
+These observations do not include fighter positions, damage, actions or full RNG
+state; those layouts remain unverified. Equal records do not prove equal gameplay.
+Different battle clocks narrow the investigation but do not prove the cause.
+The reads are on the application thread, not an atomic snapshot of all workers.
+Do not force the clocks to agree or overwrite fighter state based only on this
+capture. First compare both exports, then target the differing path for a fix.
+
 `dotnet run --project tests/RyuSync.NetworkTests -c Release` exercises real TCP/UDP
 input transport, host/guest controller mapping, chunked save transfer, startup
 acknowledgements, isolation, cleanup, shared random bytes, incompatible settings,

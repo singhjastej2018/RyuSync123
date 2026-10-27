@@ -17,11 +17,13 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         private ulong _randomCounter;
 
         public long UnixTime { get; }
+        public string DiagnosticSessionId { get; }
         public string GuestSaveDirectory { get; }
 
         public RyuSyncLaunchContext(RyuSyncLaunchSnapshot snapshot, bool guest)
         {
             _seed = Convert.FromHexString(snapshot.Manifest.Seed);
+            DiagnosticSessionId = Convert.ToHexString(SHA256.HashData(_seed));
             UnixTime = snapshot.Manifest.UnixTime;
             if (guest)
             {

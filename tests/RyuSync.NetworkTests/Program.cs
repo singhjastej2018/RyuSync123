@@ -8,6 +8,7 @@ using System.Text;
 
 // Test both sides of a real TCP connection and exchange UDP controller packets.
 HookTests.Run();
+DiagnosticTests.Run();
 await HookRuntimeTests.Run();
 // Reflection avoids adding a production API solely for ephemeral test ports.
 for (int delay = 0; delay <= RyuSyncSession.MaximumInputDelayFrames; delay++)

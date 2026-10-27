@@ -64,6 +64,27 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
 
         public static RyuSyncSession Instance { get; } = new();
         public RyuSyncLaunchTransfer LaunchTransfer { get; private set; }
+        private RyuSyncDiagnostics _diagnostics;
+        public RyuSyncDiagnostics Diagnostics
+        {
+            get { lock (_sync) return _diagnostics; }
+        }
+
+        internal void SetDiagnostics(RyuSyncDiagnostics diagnostics)
+        {
+            lock (_sync) _diagnostics = diagnostics;
+            RaiseStateChanged();
+        }
+
+        internal bool GetDiagnosticInputs(long step, out GamepadInput p1, out GamepadInput p2)
+        {
+            lock (_sync)
+            {
+                p1 = _currentP1;
+                p2 = _currentP2;
+                return _simulationStepClock == true && _lastSimulationStep == step && _hasCurrentPair;
+            }
+        }
 
         public event Action StateChanged;
         public event Action InvitationReceived;

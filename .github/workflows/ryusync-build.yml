@@ -42,6 +42,9 @@ jobs:
       - name: Test RyuSync controller transport
         run: dotnet run --project tests/RyuSync.NetworkTests -c Release
 
+      - name: Test diagnostic comparison
+        run: python -m unittest discover -s tests/diagnostics
+
       - name: Build verified LibHac source
         shell: bash
         run: |

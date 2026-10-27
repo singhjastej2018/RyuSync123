@@ -65,6 +65,10 @@
                 <ComboBox x:Name="BufferFramesBox" MinWidth="80" />
             </StackPanel>
             <TextBlock x:Name="BufferDescription" TextWrapping="Wrap" FontSize="12" Opacity="0.75" />
+            <Button x:Name="ExportDiagnosticsButton" Click="ExportDiagnostics_OnClick"
+                    Content="Export recent diagnostics" IsEnabled="False" />
+            <TextBlock x:Name="DiagnosticStatus" TextWrapping="Wrap" FontSize="12"
+                       Text="After a mismatch, both players should export immediately. Keeps the last 8192 completed updates (about two minutes at 60 updates/sec). Records inputs and battle counters, not full game state." />
             <TextBlock Text="The host chooses before inviting. Both players use that value. More buffering adds delay but gives inputs longer to arrive. Motion controls and rumble are not synchronized."
                        TextWrapping="Wrap"
                        FontSize="12"

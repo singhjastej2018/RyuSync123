@@ -1,6 +1,7 @@
 using Ryujinx.Common.Logging;
 using Ryujinx.Cpu;
 using Ryujinx.HLE.HOS.Kernel.Threading;
+using Ryujinx.Memory;
 using System;
 using System.Diagnostics;
 
@@ -15,12 +16,19 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         private KThread _thread;
         private long _nextStart;
         private bool _failed;
+        private readonly RyuSyncDiagnostics _diagnostics;
+        private RyuSyncBattleClock _before;
+        private GamepadInput _p1;
+        private GamepadInput _p2;
+        private bool _inputsValid;
+        private bool _diagnosticFailed;
 
-        public RyuSyncSsbuHook(Switch device, ulong mainAddress)
+        public RyuSyncSsbuHook(Switch device, ulong mainAddress, RyuSyncDiagnostics diagnostics = null)
         {
             _device = device;
             _mainAddress = mainAddress;
             _connection = RyuSyncSession.Instance.LaunchTransfer;
+            _diagnostics = diagnostics;
         }
 
         public bool Handle(IExecutionContext context, KThread thread, ulong address, int id)
@@ -82,9 +90,11 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 {
                     _sequence.BeforeUpdate();
                     context.SetX(0, thread.Owner.CpuMemory.Read<ulong>(context.GetX(31) + 0x288));
+                    CaptureDiagnostics(thread, session, before: true);
                 }
                 else
                 {
+                    CaptureDiagnostics(thread, session, before: false);
                     _sequence.Complete();
                     context.SetX(8, thread.Owner.CpuMemory.Read<uint>(context.GetX(26) + 0x4F8));
                     if (_sequence.Step == 1 || _sequence.Step % 600 == 0)
@@ -109,6 +119,30 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 context.StopRunning();
             }
             return true;
+        }
+
+        private void CaptureDiagnostics(KThread thread, RyuSyncSession session, bool before)
+        {
+            if (_diagnostics == null || _diagnosticFailed) return;
+            try
+            {
+                RyuSyncBattleClock clock = RyuSyncBattleClock.Read(thread.Owner.CpuMemory.Read<uint>, _mainAddress);
+                if (before)
+                {
+                    _before = clock;
+                    _inputsValid = session.GetDiagnosticInputs(_sequence.Step, out _p1, out _p2);
+                }
+                else
+                {
+                    _diagnostics.Add(new(_sequence.Step, _inputsValid, _p1, _p2, _before, clock));
+                }
+            }
+            catch (InvalidMemoryRegionException)
+            {
+                // Instrumentation must not disconnect or change the running game.
+                _diagnosticFailed = true;
+                _diagnostics.Fail("Battle clock could not be read; capture stopped.");
+            }
         }
     }
 }

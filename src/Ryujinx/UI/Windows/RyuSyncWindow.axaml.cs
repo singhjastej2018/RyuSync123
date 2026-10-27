@@ -1,7 +1,10 @@
 using Avalonia.Threading;
+using Ryujinx.Common.Configuration;
 using Ryujinx.HLE.HOS.Services.Hid.Netplay;
 using System;
 using System.Linq;
+using System.IO;
+using System.Threading.Tasks;
 
 namespace Ryujinx.Ava.UI.Windows
 {
@@ -9,6 +12,7 @@ namespace Ryujinx.Ava.UI.Windows
     {
         private readonly RyuSyncSession _session = RyuSyncSession.Instance;
         private bool _inviting;
+        private bool _exporting;
 
         public RyuSyncWindow()
         {
@@ -73,9 +77,36 @@ namespace Ryujinx.Ava.UI.Windows
             Dispatcher.UIThread.Post(UpdateUi);
         }
 
+        private async void ExportDiagnostics_OnClick(object sender, Avalonia.Interactivity.RoutedEventArgs e)
+        {
+            RyuSyncDiagnostics diagnostics = _session.Diagnostics;
+            if (_exporting || diagnostics == null) return;
+            _exporting = true;
+            UpdateUi();
+            try
+            {
+                string trace = await Task.Run(diagnostics.Export);
+                string directory = Path.Combine(AppDataManager.BaseDirPath, "Logs");
+                Directory.CreateDirectory(directory);
+                string path = Path.Combine(directory, $"RyuSync-diagnostics-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.txt");
+                await File.WriteAllTextAsync(path, trace);
+                DiagnosticStatus.Text = $"Saved: {path}. Send both players' files from this session.";
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                DiagnosticStatus.Text = $"Could not export diagnostics: {ex.Message}";
+            }
+            finally
+            {
+                _exporting = false;
+                UpdateUi();
+            }
+        }
+
         private void UpdateUi()
         {
             bool connected = _session.IsSessionEstablished;
+            ExportDiagnosticsButton.IsEnabled = !_exporting && _session.Diagnostics != null;
 
             StatusText.Text = _session.Status;
             RoleText.Text = _session.Role switch

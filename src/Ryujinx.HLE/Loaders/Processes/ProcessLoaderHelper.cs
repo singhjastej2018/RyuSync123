@@ -441,7 +441,9 @@ namespace Ryujinx.HLE.Loaders.Processes
 
             if (syncMainIndex >= 0)
             {
-                process.RyuSyncHook = new RyuSyncSsbuHook(device, nsoBase[syncMainIndex]);
+                RyuSyncDiagnostics diagnostics = new(device.Configuration.RyuSyncLaunch.DiagnosticSessionId, RyuSyncSession.Instance.Role);
+                RyuSyncSession.Instance.SetDiagnostics(diagnostics);
+                process.RyuSyncHook = new RyuSyncSsbuHook(device, nsoBase[syncMainIndex], diagnostics);
                 Logger.Info?.Print(LogClass.Loader, "RyuSync experimental SSBU 1.0.0 numbered updates enabled; translation disk cache disabled.");
             }
 

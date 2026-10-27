@@ -24,13 +24,18 @@ internal static class HookRuntimeTests
             {
                 const ulong main = 0x8504000;
                 Switch device = new();
-                RyuSyncSsbuHook hook = new(device, main);
+                RyuSyncDiagnostics diagnostics = scenario == "normal" ? new("hook-test", RyuSyncRole.Host) : null;
+                RyuSyncSsbuHook hook = new(device, main, diagnostics);
                 KThread thread = new();
                 TestExecutionContext context = new();
                 ulong[] original = (ulong[])context.Registers.Clone();
                 thread.Owner.CpuMemory.Values[context.GetX(25) + 0x4F4] = (byte)1;
                 thread.Owner.CpuMemory.Values[context.GetX(31) + 0x288] = 0x12345678UL;
                 thread.Owner.CpuMemory.Values[context.GetX(26) + 0x4F8] = uint.MaxValue;
+                foreach (ulong offset in new ulong[] { 0x64548A0, 0x64548A4, 0x64548A8, 0x64548AC, 0x64548B0, 0x4319CC0 })
+                {
+                    thread.Owner.CpuMemory.Values[main + offset] = 1U;
+                }
                 int commits = 0;
                 device.Hid.Npads.Commit = step =>
                 {
@@ -83,6 +88,7 @@ internal static class HookRuntimeTests
                     if (i != 8) Require(context.GetX(i) == original[i], "Hook clobbered a guest register");
                 }
                 Require(commits == 2 && context.Running, "Completing an update consumed another input pair");
+                Require(diagnostics.Export().Contains("\n0|0|"), "Hook omitted diagnostics or marked missing input metadata as valid");
 
                 bool Call(int offset, int id) => hook.Handle(context, thread, main + (ulong)offset, id);
             }

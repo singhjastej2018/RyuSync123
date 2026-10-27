@@ -32,6 +32,16 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             (0x278F088, 0x11000508, 0x11000508),
             (0x278F08C, 0xB904FB48, 0xB904FB48),
             (0x278F1AC, 0x97FF7925, 0xD503201F), // nop: no second update with cached input
+            // Read-only guards for the diagnostic clock addresses and their writers.
+            (0xE7D848, 0x9001A4E8, 0x9001A4E8),
+            (0xE7D84C, 0xB94CC116, 0xB94CC116),
+            (0xE7DA98, 0xF002AEA8, 0xF002AEA8),
+            (0xE7DA9C, 0x91228108, 0x91228108),
+            (0xE7DAC8, 0xB9000509, 0xB9000509),
+            (0xE7DAD8, 0xB9000D09, 0xB9000D09),
+            (0xE7DB34, 0xB900050A, 0xB900050A),
+            (0xE7DB70, 0xB9000D09, 0xB9000D09),
+            (0xE7DB90, 0x94006178, 0x94006178),
         ];
 
         public static void Apply(Span<byte> text, uint textOffset, string buildId)
