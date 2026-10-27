@@ -36,6 +36,18 @@ class CompareTests(unittest.TestCase):
         self.assertIn("unknown input metadata: 1", text)
         self.assertNotIn("applied controller inputs differ", text)
 
+    def test_optional_timing_totals(self):
+        a, b = self.fixtures()
+        a[0].update(timed_updates="2", timing_frequency="1000", pacing_ticks="10",
+                    input_wait_ticks="20", application_ticks="30")
+        text = compare(a, b)
+        self.assertIn("Identical applied inputs: 2 of 2", text)
+        self.assertIn("Host averages over 2", text)
+        self.assertIn("pacing 5.000 ms, input wait 10.000 ms, application 15.000 ms", text)
+        self.assertNotIn("Guest averages", text)
+        a[0]["timing_frequency"] = "0"
+        with self.assertRaises(ValueError): compare(a, b)
+
     def test_wrong_session_role_or_no_overlap(self):
         for change in ("session", "role", "overlap"):
             a, b = self.fixtures()

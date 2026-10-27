@@ -21,7 +21,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
     {
         public const int ControlPort = 24872;
         public const int InputPort = 24873;
-        public const int ProtocolVersion = 3; // Requires the SSBU 1.0.0 numbered-update hook on both peers.
+        public const int ProtocolVersion = 4; // Includes loading readiness in each immutable buffered input.
         public const int DefaultInputDelayFrames = 3;
         public const int MaximumInputDelayFrames = 8;
 
@@ -29,8 +29,27 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         private static readonly long InputFrameTicks = Stopwatch.Frequency / 60;
 
         private readonly object _sync = new();
-        private readonly SortedDictionary<long, GamepadInput> _localFrames = [];
-        private readonly Dictionary<long, GamepadInput> _remoteFrames = [];
+        private readonly record struct InputFrame(GamepadInput Input, RyuSyncReadinessStamp Readiness);
+        private RyuSyncReadinessStamp _localReadiness;
+        private RyuSyncReadinessStamp _committedLocalReadiness;
+        private RyuSyncReadinessStamp _committedRemoteReadiness;
+
+        internal void SetReadiness(RyuSyncReadinessStamp readiness)
+        {
+            lock (_sync) _localReadiness = readiness;
+        }
+
+        internal void GetReadiness(out RyuSyncReadinessStamp local, out RyuSyncReadinessStamp remote)
+        {
+            lock (_sync)
+            {
+                local = _committedLocalReadiness;
+                remote = _committedRemoteReadiness;
+            }
+        }
+
+        private readonly SortedDictionary<long, InputFrame> _localFrames = [];
+        private readonly Dictionary<long, InputFrame> _remoteFrames = [];
 
         private TcpListener _listener;
         private TcpClient _controlClient;
@@ -85,6 +104,10 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 return _simulationStepClock == true && _lastSimulationStep == step && _hasCurrentPair;
             }
         }
+
+        // Invoked outside _sync: listeners may enter the emulated scheduler.
+        internal event Action InputAvailable;
+        internal void NotifyInputAvailable() => InputAvailable?.Invoke();
 
         public event Action StateChanged;
         public event Action InvitationReceived;
@@ -436,20 +459,26 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                     {
                         GamepadInput canonicalLocal = localInput;
                         canonicalLocal.PlayerId = _role == RyuSyncRole.Host ? PlayerIndex.Player1 : PlayerIndex.Player2;
-                        _localFrames[scheduledTick] = canonicalLocal;
+                        _localFrames[scheduledTick] = new(canonicalLocal, _localReadiness);
                         packetToSend = BuildInputPacketLocked();
                     }
 
                     if (_playbackTick < _inputDelayFrames)
                     {
+                        _committedLocalReadiness = default;
+                        _committedRemoteReadiness = default;
                         _currentP1 = Neutral(PlayerIndex.Player1);
                         _currentP2 = Neutral(PlayerIndex.Player2);
                         _hasCurrentPair = true;
                         AdvancePlaybackTickLocked(now);
                     }
-                    else if (_localFrames.TryGetValue(_playbackTick, out GamepadInput local) &&
-                             _remoteFrames.TryGetValue(_playbackTick, out GamepadInput remote))
+                    else if (_localFrames.TryGetValue(_playbackTick, out InputFrame localFrame) &&
+                             _remoteFrames.TryGetValue(_playbackTick, out InputFrame remoteFrame))
                     {
+                        GamepadInput local = localFrame.Input;
+                        GamepadInput remote = remoteFrame.Input;
+                        _committedLocalReadiness = localFrame.Readiness;
+                        _committedRemoteReadiness = remoteFrame.Readiness;
                         if (_playbackTick == _inputDelayFrames)
                         {
                             _status = $"Synchronized - {_inputDelayFrames} frame input delay";
@@ -730,6 +759,9 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                     return;
                 }
 
+                _localReadiness = default;
+                _committedLocalReadiness = default;
+                _committedRemoteReadiness = default;
                 _localFrames.Clear();
                 _remoteFrames.Clear();
                 _playbackTick = 0;
@@ -790,9 +822,9 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             }
 
             long oldestUsefulTick = Math.Max(0, _playbackTick - RedundantInputCount);
-            List<KeyValuePair<long, GamepadInput>> frames = [];
+            List<KeyValuePair<long, InputFrame>> frames = [];
 
-            foreach (KeyValuePair<long, GamepadInput> pair in _localFrames)
+            foreach (KeyValuePair<long, InputFrame> pair in _localFrames)
             {
                 if (pair.Key >= oldestUsefulTick)
                 {
@@ -810,15 +842,18 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             writer.Write((byte)ProtocolVersion);
             writer.Write((byte)frames.Count);
 
-            foreach (KeyValuePair<long, GamepadInput> pair in frames)
+            foreach (KeyValuePair<long, InputFrame> pair in frames)
             {
-                GamepadInput state = pair.Value;
+                GamepadInput state = pair.Value.Input;
                 writer.Write(pair.Key);
                 writer.Write((long)state.Buttons);
                 writer.Write(state.LStick.Dx);
                 writer.Write(state.LStick.Dy);
                 writer.Write(state.RStick.Dx);
                 writer.Write(state.RStick.Dy);
+                writer.Write(pair.Value.Readiness.Epoch);
+                writer.Write(pair.Value.Readiness.Kind);
+                writer.Write(pair.Value.Readiness.Ready ? 1U : 0U);
             }
 
             _lastUdpSendTimestamp = Stopwatch.GetTimestamp();
@@ -928,42 +963,55 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 }
 
                 int count = reader.ReadByte();
-                if (count > RedundantInputCount)
+                if (count == 0 || count > RedundantInputCount || data.Length != 2 + count * 48)
                 {
                     return;
                 }
 
+                Span<(long Tick, InputFrame Frame)> decoded = stackalloc (long, InputFrame)[count];
+                for (int i = 0; i < count; i++)
+                {
+                    long tick = reader.ReadInt64();
+                    GamepadInput state = new()
+                    {
+                        PlayerId = PlayerIndex.Player1, // Assigned canonically at consumption.
+                        Buttons = (ControllerKeys)reader.ReadInt64(),
+                        LStick = new JoystickPosition
+                        {
+                            Dx = reader.ReadInt32(),
+                            Dy = reader.ReadInt32(),
+                        },
+                        RStick = new JoystickPosition
+                        {
+                            Dx = reader.ReadInt32(),
+                            Dy = reader.ReadInt32(),
+                        },
+                    };
+
+                    long epoch = reader.ReadInt64();
+                    uint kind = reader.ReadUInt32();
+                    uint ready = reader.ReadUInt32();
+                    if (tick < 0 || epoch < 0 || ready > 1 || (epoch == 0 && (kind != 0 || ready != 0)) || (epoch > 0 && kind == 0))
+                        return;
+                    decoded[i] = (tick, new(state, new(epoch, kind, ready != 0)));
+                }
                 lock (_sync)
                 {
-                    for (int i = 0; i < count; i++)
+                    foreach (var entry in decoded)
                     {
-                        long tick = reader.ReadInt64();
-                        GamepadInput state = new()
+                        if (entry.Tick >= _playbackTick)
                         {
-                            PlayerId = _role == RyuSyncRole.Host ? PlayerIndex.Player2 : PlayerIndex.Player1,
-                            Buttons = (ControllerKeys)reader.ReadInt64(),
-                            LStick = new JoystickPosition
-                            {
-                                Dx = reader.ReadInt32(),
-                                Dy = reader.ReadInt32(),
-                            },
-                            RStick = new JoystickPosition
-                            {
-                                Dx = reader.ReadInt32(),
-                                Dy = reader.ReadInt32(),
-                            },
-                        };
-
-                        if (tick >= _playbackTick)
-                        {
-                            _remoteFrames[tick] = state;
+                            // Retransmissions must not mutate a buffered decision.
+                            _remoteFrames.TryAdd(entry.Tick, entry.Frame);
                         }
                     }
                 }
             }
             catch (EndOfStreamException)
             {
+                return;
             }
+            NotifyInputAvailable();
         }
 
         private void SendControl(string message)
@@ -1035,6 +1083,9 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 _localGameStarted = false;
                 _remoteGameStarted = false;
                 _gameplayClockStarted = false;
+                _localReadiness = default;
+                _committedLocalReadiness = default;
+                _committedRemoteReadiness = default;
                 _localFrames.Clear();
                 _remoteFrames.Clear();
                 _hasCurrentPair = false;
@@ -1051,6 +1102,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 _disconnecting = false;
             }
 
+            NotifyInputAvailable();
             RaiseStateChanged();
         }
 

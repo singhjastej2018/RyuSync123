@@ -63,6 +63,24 @@ def compare(first, second):
     for meta in (a_meta, b_meta):
         if meta["error"]:
             output.append(f"{meta['role']} capture error: {meta['error']}")
+    matched = sum(a[step][0] and b[step][0] and a[step][1] == b[step][1] for step in common)
+    output.append(f"Identical applied inputs: {matched} of {len(common)} common updates.")
+    for meta in (a_meta, b_meta):
+        if "timed_updates" not in meta:
+            continue
+        count = int(meta["timed_updates"])
+        frequency = int(meta["timing_frequency"])
+        if count < 0 or frequency <= 0:
+            raise ValueError("Invalid timing metadata")
+        if count:
+            averages = []
+            for field, label in (("pacing_ticks", "pacing"), ("input_wait_ticks", "input wait"),
+                                 ("application_ticks", "application")):
+                ticks = int(meta[field])
+                if ticks < 0:
+                    raise ValueError("Invalid timing metadata")
+                averages.append(f"{label} {ticks * 1000 / frequency / count:.3f} ms")
+            output.append(f"{meta['role']} averages over {count} completed timed updates: " + ", ".join(averages) + ".")
     found = False
     for step in common:
         left, right = a[step], b[step]
@@ -91,5 +109,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         print(compare(load(args.first), load(args.second)))
-    except (ValueError, OSError) as error:
+    except (ValueError, KeyError, OSError) as error:
         parser.exit(2, str(error) + "\n")

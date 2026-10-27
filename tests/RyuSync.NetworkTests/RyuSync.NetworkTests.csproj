@@ -5,6 +5,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Ryujinx.HLE/HOS/Services/Hid/Netplay/RyuSyncReadiness.cs" Link="RyuSyncReadiness.cs" />
     <!-- Exercise the production session without emulator or external package dependencies. -->
     <Compile Include="../../src/Ryujinx.HLE/HOS/Services/Hid/Netplay/RyuSyncSession.cs" Link="RyuSyncSession.cs" />
     <Compile Include="../../src/Ryujinx.HLE/HOS/Services/Hid/Netplay/RyuSyncSsbuPatch.cs" Link="RyuSyncSsbuPatch.cs" />

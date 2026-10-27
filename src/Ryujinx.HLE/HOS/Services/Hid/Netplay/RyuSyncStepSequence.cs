@@ -17,6 +17,11 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             Step++;
         }
 
+        public void RequireUpdating()
+        {
+            if (_phase != 3) throw new InvalidOperationException("SSBU loading gate ran outside the synchronized update.");
+        }
+
         private void Move(int expected, int next)
         {
             if (_phase != expected)

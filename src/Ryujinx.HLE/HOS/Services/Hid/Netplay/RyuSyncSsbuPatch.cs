@@ -11,6 +11,14 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         public const int InputSvc = 0x7F00;
         public const int UpdateSvc = 0x7F01;
         public const int CompleteSvc = 0x7F02;
+        public const int AsyncBeginSvc = 0x7F03;
+        public const int AsyncPollSvc = 0x7F04;
+        public const int LoadBeginSvc = 0x7F05;
+        public const int LoadPollSvc = 0x7F06;
+        public const int AsyncBeginOffset = 0xE7E490;
+        public const int AsyncPollOffset = 0xE7E560;
+        public const int LoadBeginOffset = 0xE7E6E4;
+        public const int LoadPollOffset = 0xF84BB8;
         public const int InputOffset = 0x278EC1C;
         public const int UpdateOffset = 0x278F07C;
         public const int CompleteOffset = 0x278F084;
@@ -32,6 +40,14 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             (0x278F088, 0x11000508, 0x11000508),
             (0x278F08C, 0xB904FB48, 0xB904FB48),
             (0x278F1AC, 0x97FF7925, 0xD503201F), // nop: no second update with cached input
+            // Loading state enter/poll sites, before the state-pop request.
+            (AsyncBeginOffset, 0xAA0003F3, Svc(AsyncBeginSvc)),
+            (AsyncPollOffset, 0xB9403008, Svc(AsyncPollSvc)),
+            (0xE7E564, 0x34000048, 0x34000048),
+            (LoadBeginOffset, 0x910023E0, Svc(LoadBeginSvc)),
+            (0xE7E74C, 0x94041705, 0x94041705),
+            (0xE7E750, 0x360003E0, 0x360003E0),
+            (LoadPollOffset, 0xA9467BFD, Svc(LoadPollSvc)),
             // Read-only guards for the diagnostic clock addresses and their writers.
             (0xE7D848, 0x9001A4E8, 0x9001A4E8),
             (0xE7D84C, 0xB94CC116, 0xB94CC116),

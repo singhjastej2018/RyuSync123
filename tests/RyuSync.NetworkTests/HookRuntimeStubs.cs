@@ -54,6 +54,7 @@ namespace Ryujinx.HLE
     internal sealed class Switch
     {
         public TestHid Hid { get; } = new();
+        public TestSystem System { get; } = new();
     }
 
     internal sealed class TestHid
@@ -65,5 +66,55 @@ namespace Ryujinx.HLE
     {
         public Func<long, bool> Commit { get; set; } = _ => true;
         public bool TryCommitSimulationStep(long step) => Commit(step);
+    }
+}
+
+namespace Ryujinx.HLE.HOS.Kernel.Common
+{
+    internal abstract class KSynchronizationObject
+    {
+        public abstract bool IsSignaled();
+    }
+}
+
+namespace Ryujinx.HLE.HOS.Kernel.Threading
+{
+    internal sealed class KReadableEvent : Ryujinx.HLE.HOS.Kernel.Common.KSynchronizationObject
+    {
+        private bool _signaled;
+        public KReadableEvent(Ryujinx.HLE.TestKernelContext context) { }
+        public void Signal() => _signaled = true;
+        public void ClearIfSignaled() => _signaled = false;
+        public override bool IsSignaled() => _signaled;
+    }
+}
+
+namespace Ryujinx.HLE
+{
+    internal sealed class TestSystem
+    {
+        public TestKernelContext KernelContext { get; } = new();
+    }
+
+    internal sealed class TestKernelContext
+    {
+        public TestSynchronization Synchronization { get; } = new();
+    }
+
+    internal sealed class TestSynchronization
+    {
+        public Action OnWait { get; set; } = () => { };
+        public int Waits { get; private set; }
+        public int SignalsObserved { get; private set; }
+        public void WaitFor(Ryujinx.HLE.HOS.Kernel.Common.KSynchronizationObject[] objects,
+            long timeout, out int index)
+        {
+            if (timeout != 4_000_000) throw new Exception("UDP retry deadline changed");
+            Waits++;
+            index = Array.FindIndex(objects, item => item.IsSignaled());
+            if (index >= 0) SignalsObserved++;
+            else OnWait();
+            if (Waits > 10000) throw new Exception("Hook failed to cancel input wait");
+        }
     }
 }

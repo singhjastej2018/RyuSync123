@@ -10,7 +10,8 @@ internal static class HookRuntimeTests
 {
     public static async Task Run()
     {
-        foreach (string scenario in new[] { "normal", "cancel", "disconnect", "wrong-thread", "wrong-order" })
+        CheckSessionNotifications();
+        foreach (string scenario in new[] { "normal", "arrival-race", "buffered", "cancel", "disconnect", "wrong-thread", "wrong-order" })
         {
             using TcpListener listener = new(IPAddress.Loopback, 0);
             listener.Start();
@@ -41,13 +42,16 @@ internal static class HookRuntimeTests
                 {
                     Require(step == 0, "A waiting hook skipped its update");
                     commits++;
-                    return scenario is not ("cancel" or "disconnect") && commits > 1;
+                    if (scenario == "arrival-race" && commits == 1) session.NotifyInputAvailable();
+                    return scenario == "buffered" || (scenario is not ("cancel" or "disconnect") && commits > 1);
                 };
                 thread.OnSleep = () =>
                 {
                     if (scenario == "disconnect") session.Disconnect();
                     if (scenario == "cancel" || !session.IsSessionEstablished) thread.TerminationRequested = true;
                 };
+
+                device.System.KernelContext.Synchronization.OnWait = thread.OnSleep;
 
                 Require(!hook.Handle(context, thread, main, RyuSyncSsbuPatch.InputSvc), "Hook accepted an unpatched address");
                 Require(!hook.Handle(context, thread, main + RyuSyncSsbuPatch.InputOffset, 1), "Hook accepted a normal SVC");
@@ -69,7 +73,11 @@ internal static class HookRuntimeTests
                     continue;
                 }
 
-                Require(commits == 2 && thread.Sleeps == 1, "Hook did not wait for the input pair");
+                int expectedCommits = scenario == "buffered" ? 1 : 2;
+                Require(commits == expectedCommits && thread.Sleeps == 0, "Hook polled instead of waiting for input");
+                Require(device.System.KernelContext.Synchronization.Waits == expectedCommits - 1, "Buffered input did not take the immediate path");
+                if (scenario == "arrival-race") Require(device.System.KernelContext.Synchronization.SignalsObserved == 1,
+                    "Arrival between commit and wait lost its signal");
                 Require(context.GetX(8) == 1, "Replaced byte load was not emulated");
                 if (scenario == "wrong-thread")
                 {
@@ -87,17 +95,58 @@ internal static class HookRuntimeTests
                 {
                     if (i != 8) Require(context.GetX(i) == original[i], "Hook clobbered a guest register");
                 }
-                Require(commits == 2 && context.Running, "Completing an update consumed another input pair");
-                Require(diagnostics.Export().Contains("\n0|0|"), "Hook omitted diagnostics or marked missing input metadata as valid");
+                Require(commits == expectedCommits && context.Running, "Completing an update consumed another input pair");
+                if (diagnostics != null)
+                {
+                    Require(diagnostics.Export().Contains("\n0|0|"), "Hook omitted diagnostics or marked missing input metadata as valid");
+                    Require(diagnostics.Export().Contains("timed_updates=1"), "Hook did not report timing");
+                }
 
                 bool Call(int offset, int id) => hook.Handle(context, thread, main + (ulong)offset, id);
             }
             finally
             {
+                Require(typeof(RyuSyncSession).GetField("InputAvailable", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(session) == null,
+                    "Hook leaked an input notification listener");
                 session.Disconnect();
             }
         }
         Console.WriteLine("PASS: runtime hook yields for input, preserves replaced loads, rejects wrong address/thread/order and cancels on shutdown.");
+    }
+
+    private static void CheckSessionNotifications()
+    {
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        RyuSyncSession session = (RyuSyncSession)Activator.CreateInstance(typeof(RyuSyncSession), nonPublic: true)!;
+        IPEndPoint endpoint = new(IPAddress.Loopback, 24873);
+        typeof(RyuSyncSession).GetField("_remoteInputEndpoint", flags)!.SetValue(session, endpoint);
+        object sync = typeof(RyuSyncSession).GetField("_sync", flags)!.GetValue(session)!;
+        int notifications = 0;
+        session.InputAvailable += () =>
+        {
+            Require(!System.Threading.Monitor.IsEntered(sync), "Input notification held the session lock while entering the scheduler");
+            notifications++;
+        };
+        using MemoryStream packet = new();
+        using (BinaryWriter writer = new(packet, System.Text.Encoding.UTF8, leaveOpen: true))
+        {
+            writer.Write((byte)RyuSyncSession.ProtocolVersion);
+            writer.Write((byte)1);
+            writer.Write(0L);
+            writer.Write(0L);
+            for (int i = 0; i < 4; i++) writer.Write(0);
+            writer.Write(0L);
+            writer.Write(0U);
+            writer.Write(0U);
+        }
+        var receive = typeof(RyuSyncSession).GetMethod("HandleInputPacket", flags)!;
+        receive.Invoke(session, [packet.ToArray(), endpoint]);
+        Require(notifications == 1, "Accepted input did not wake the hook");
+        receive.Invoke(session, [new byte[] { 255, 0 }, endpoint]);
+        receive.Invoke(session, [packet.ToArray(), new IPEndPoint(IPAddress.Parse("127.0.0.2"), 24873)]);
+        Require(notifications == 1, "Rejected packet woke the hook");
+        session.Disconnect();
+        Require(notifications == 2, "Disconnect did not wake the hook");
     }
 
     private static void Require(bool condition, string message)

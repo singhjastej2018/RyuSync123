@@ -35,6 +35,10 @@ internal static class HookTests
             (RyuSyncSsbuPatch.InputOffset, RyuSyncSsbuPatch.InputSvc),
             (RyuSyncSsbuPatch.UpdateOffset, RyuSyncSsbuPatch.UpdateSvc),
             (RyuSyncSsbuPatch.CompleteOffset, RyuSyncSsbuPatch.CompleteSvc),
+            (RyuSyncSsbuPatch.AsyncBeginOffset, RyuSyncSsbuPatch.AsyncBeginSvc),
+            (RyuSyncSsbuPatch.AsyncPollOffset, RyuSyncSsbuPatch.AsyncPollSvc),
+            (RyuSyncSsbuPatch.LoadBeginOffset, RyuSyncSsbuPatch.LoadBeginSvc),
+            (RyuSyncSsbuPatch.LoadPollOffset, RyuSyncSsbuPatch.LoadPollSvc),
         })
         {
             uint op = Read(offset);

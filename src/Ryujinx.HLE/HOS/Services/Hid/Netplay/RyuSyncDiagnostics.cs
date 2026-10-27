@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Diagnostics;
 using System.Text;
 
 namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
@@ -33,6 +34,10 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
         private int _next;
         private int _count;
         private long _total;
+        private long _timedUpdates;
+        private long _pacingTicks;
+        private long _inputWaitTicks;
+        private long _updateTicks;
         private string _error = string.Empty;
 
         internal RyuSyncDiagnostics(string sessionId, RyuSyncRole role)
@@ -52,6 +57,17 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             }
         }
 
+        internal void AddTiming(long pacingTicks, long inputWaitTicks, long updateTicks)
+        {
+            lock (_sync)
+            {
+                _timedUpdates++;
+                _pacingTicks += pacingTicks;
+                _inputWaitTicks += inputWaitTicks;
+                _updateTicks += updateTicks;
+            }
+        }
+
         internal void Fail(string reason)
         {
             lock (_sync) _error = reason;
@@ -62,6 +78,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             RyuSyncDiagnosticSample[] samples;
             long total;
             string error;
+            long timedUpdates, pacingTicks, inputWaitTicks, updateTicks;
             lock (_sync)
             {
                 samples = new RyuSyncDiagnosticSample[_count];
@@ -69,6 +86,10 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 for (int i = 0; i < _count; i++) samples[i] = _samples[(start + i) % Capacity];
                 total = _total;
                 error = _error;
+                timedUpdates = _timedUpdates;
+                pacingTicks = _pacingTicks;
+                inputWaitTicks = _inputWaitTicks;
+                updateTicks = _updateTicks;
             }
 
             StringBuilder output = new();
@@ -78,6 +99,13 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
             output.AppendLine($"build={RyuSyncSsbuPatch.BuildId}");
             output.AppendLine(FormattableString.Invariant($"total={total}"));
             output.AppendLine($"error={error}");
+            // Optional V1 metadata: all completed timed updates, not only the ring.
+            // These categories do not cover the entire outer loop.
+            output.AppendLine(FormattableString.Invariant($"timed_updates={timedUpdates}"));
+            output.AppendLine(FormattableString.Invariant($"timing_frequency={Stopwatch.Frequency}"));
+            output.AppendLine(FormattableString.Invariant($"pacing_ticks={pacingTicks}"));
+            output.AppendLine(FormattableString.Invariant($"input_wait_ticks={inputWaitTicks}"));
+            output.AppendLine(FormattableString.Invariant($"application_ticks={updateTicks}"));
             output.AppendLine("# step|inputs_valid|p1(buttons,lx,ly,rx,ry)|p2|before(flags,c04,slow,c0c,rate,mode)|after");
             foreach (var sample in samples)
             {

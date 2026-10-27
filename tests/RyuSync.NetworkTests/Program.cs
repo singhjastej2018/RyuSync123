@@ -8,8 +8,10 @@ using System.Text;
 
 // Test both sides of a real TCP connection and exchange UDP controller packets.
 HookTests.Run();
+ReadinessTests.Run();
 DiagnosticTests.Run();
 await HookRuntimeTests.Run();
+await LoadingHookTests.Run();
 // Reflection avoids adding a production API solely for ephemeral test ports.
 for (int delay = 0; delay <= RyuSyncSession.MaximumInputDelayFrames; delay++)
 {
@@ -103,6 +105,9 @@ static async Task CheckInputExchange(RyuSyncRole role, int delay, bool simulatio
             {
                 writer.Write(0);
             }
+            writer.Write(0L);
+            writer.Write(0U);
+            writer.Write(0U);
         }
 
         byte[] data = packet.ToArray();

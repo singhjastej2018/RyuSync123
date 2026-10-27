@@ -95,6 +95,9 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Netplay
                 _localInputTimestamp = Stopwatch.GetTimestamp();
             }
 
+            // Outside _inputLock: the notification can enter the scheduler.
+            session.NotifyInputAvailable();
+
             if (session.IsSessionEstablished && !session.GameplayClockStarted)
             {
                 PauseForBarrier();

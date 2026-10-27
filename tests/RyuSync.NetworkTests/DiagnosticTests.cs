@@ -17,6 +17,8 @@ internal static class DiagnosticTests
         {
             capture.Add(new(i, true, default, default, clock, clock));
         }
+        capture.AddTiming(10, 20, 30);
+        capture.AddTiming(2, 3, 4);
         CultureInfo previous = CultureInfo.CurrentCulture;
         try
         {
@@ -28,6 +30,9 @@ internal static class DiagnosticTests
             {
                 throw new Exception("Diagnostic retention/order/culture handling failed");
             }
+            if (!text.Contains("timed_updates=2") || !text.Contains("pacing_ticks=12") ||
+                !text.Contains("input_wait_ticks=23") || !text.Contains("application_ticks=34"))
+                throw new Exception("Timing totals or invariant formatting failed");
             if (text != capture.Export()) throw new Exception("Export consumed the capture");
             capture.Fail("read failed");
             if (!capture.Export().Contains("error=read failed")) throw new Exception("Capture hid a read failure");
